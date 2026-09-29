@@ -1,0 +1,5 @@
+WifiADB.app/
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcworkspace/xcshareddata/
