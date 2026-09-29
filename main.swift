@@ -87,32 +87,6 @@ final class ActionButton: NSButton {
 
 // MARK: Break timer
 
-struct ActivityEntry: Codable {
-    let start: Date
-    let end: Date
-    let minutes: Int
-    let activity: String
-    let result: String  // "done" or "skipped"
-}
-
-/// Append-only JSON log of finished break timers.
-enum ActivityLog {
-    static let url = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Documents/WifiADB/activity.json")
-
-    static func append(_ entry: ActivityEntry) {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        var entries = (try? Data(contentsOf: url)).flatMap { try? decoder.decode([ActivityEntry].self, from: $0) } ?? []
-        entries.append(entry)
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? encoder.encode(entries).write(to: url)
-    }
-}
-
 /// One two-digit flip card: dark card split in the middle, digits flip when the value changes.
 final class FlipCard: NSView {
     static let cardWidth: CGFloat = 60
@@ -311,25 +285,11 @@ final class FlipClockView: NSStackView {
     }
 }
 
-/// Countdown with preset durations. When it ends it suggests an activity, asks Done / Skip,
-/// logs the answer and restarts the same duration.
+/// Break timer panel. State lives in TimerStore (shared with the widget), so this view polls it
+/// every second and re-renders when the phase or the widget changed it.
 final class BreakTimerView: NSView {
-    static let presets = [15, 30, 45, 60]
-    static let activities = [
-        "Walk around for 5 minutes",
-        "Do 10 push-ups",
-        "Do 5 pull-ups",
-        "Stretch for 3 minutes",
-        "Do 20 squats",
-        "Drink water and take a short walk",
-    ]
-
-    private enum Phase { case idle, running, prompt }
-    private var phase = Phase.idle
-    private var minutes = 0
-    private var start = Date()
-    private var end = Date()
-    private var activity = ""
+    private var state = TimerStore.load()
+    private var shownPhase: TimerState.Phase?
     private var tick: Timer?
 
     private let clock = FlipClockView()
@@ -366,74 +326,58 @@ final class BreakTimerView: NSView {
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
             row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
         ])
-        render()
+        sync()
+        tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.sync() }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func startTimer(_ mins: Int) {
-        minutes = mins
-        start = Date()
-        end = start.addingTimeInterval(TimeInterval(mins * 60))
-        phase = .running
-        clock.setStyle(.normal)
-        clock.show(seconds: mins * 60, animated: false)
-        tick?.invalidate()
-        tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.update() }
-        render()
+    private func sync() {
+        let now = Date()
+        let latest = TimerStore.load()
+        let phase = latest.phase(at: now)
+        if latest != state || phase != shownPhase {
+            state = latest
+            if phase == .prompt, let previous = shownPhase, previous != .prompt {
+                NSSound(named: "Glass")?.play()
+                onPrompt()
+            }
+            shownPhase = phase
+            render()
+        }
+        if phase == .running {
+            clock.show(seconds: Int(max(0, state.end.timeIntervalSinceNow).rounded(.up)), animated: true)
+        }
     }
 
-    private func stop() {
-        tick?.invalidate()
-        tick = nil
-        phase = .idle
-        render()
-    }
-
-    private func update() {
-        let remaining = max(0, end.timeIntervalSinceNow)
-        clock.show(seconds: Int(remaining.rounded(.up)), animated: true)
-        if remaining <= 0 { finish() }
-    }
-
-    private func finish() {
-        tick?.invalidate()
-        tick = nil
-        phase = .prompt
-        let n = UserDefaults.standard.integer(forKey: "activityIndex")
-        activity = Self.activities[n % Self.activities.count]
-        UserDefaults.standard.set(n + 1, forKey: "activityIndex")
-        clock.setStyle(.alert)
-        NSSound(named: "Glass")?.play()
-        render()
-        onPrompt()
-    }
-
-    private func answer(_ result: String) {
-        ActivityLog.append(ActivityEntry(start: start, end: Date(), minutes: minutes, activity: activity, result: result))
-        startTimer(minutes)
+    private func act(_ change: @escaping () -> Void) -> () -> Void {
+        { [weak self] in change(); self?.sync() }
     }
 
     private func render() {
         buttons.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        switch phase {
+        switch shownPhase ?? .idle {
         case .idle:
             title.stringValue = "Break timer"
             detail.stringValue = "Minutes between breaks"
             clock.setStyle(.dimmed)
             clock.show(seconds: 0, animated: false)
-            for m in Self.presets {
-                buttons.addArrangedSubview(ActionButton("\(m)", enabled: true) { [weak self] in self?.startTimer(m) })
+            for m in TimerStore.presets {
+                buttons.addArrangedSubview(ActionButton("\(m)", enabled: true, act { TimerStore.start(minutes: m) }))
             }
         case .running:
             title.stringValue = "Next break"
-            detail.stringValue = "Ends at " + end.formatted(date: .omitted, time: .shortened)
-            buttons.addArrangedSubview(ActionButton("Stop", enabled: true) { [weak self] in self?.stop() })
+            detail.stringValue = "Ends at " + state.end.formatted(date: .omitted, time: .shortened)
+            clock.setStyle(.normal)
+            clock.show(seconds: Int(max(0, state.end.timeIntervalSinceNow).rounded(.up)), animated: false)
+            buttons.addArrangedSubview(ActionButton("Stop", enabled: true, act { TimerStore.stop() }))
         case .prompt:
             title.stringValue = "Time to move!"
-            detail.stringValue = activity
-            buttons.addArrangedSubview(ActionButton("Done", enabled: true) { [weak self] in self?.answer("done") })
-            buttons.addArrangedSubview(ActionButton("Skip", enabled: true) { [weak self] in self?.answer("skipped") })
+            detail.stringValue = state.activity
+            clock.setStyle(.alert)
+            clock.show(seconds: 0, animated: false)
+            buttons.addArrangedSubview(ActionButton("Done", enabled: true, act { TimerStore.answer("done") }))
+            buttons.addArrangedSubview(ActionButton("Skip", enabled: true, act { TimerStore.answer("skipped") }))
         }
         onLayoutChange()
     }
@@ -589,22 +533,64 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.timer.onPrompt = { [weak self] in self?.setPanelVisible(true) }
         setPanelVisible(panelVisible)
         refresh()
-        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refresh() }
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
     func refresh() {
+        syncWork()
         DispatchQueue.global().async {
             let list = listDevices()
-            DispatchQueue.main.async { self.devices = list; self.updateUI() }
+            DispatchQueue.main.async {
+                self.devices = list
+                self.updateUI()
+                self.runQueuedCommand()
+            }
         }
     }
 
     func updateUI() {
-        let online = devices.filter { $0.isWireless && $0.state == "device" }.count
+        let rows = wirelessRows()
+        let online = rows.filter { $0.state == "connected" }.count
         let symbol = busy ? "arrow.triangle.2.circlepath" : online > 0 ? "wifi" : "wifi.slash"
         item.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Wireless ADB")
         item.button?.toolTip = "Wireless ADB: \(online) connected"
-        if panelVisible { panel.update(rows: wirelessRows(), busy: busy, app: self) }
+        if panelVisible { panel.update(rows: rows, busy: busy, app: self) }
+        // Publish for the widget, which cannot run adb itself.
+        DeviceStore.saveDevices(rows.map { DeviceInfo(addr: $0.addr, model: $0.model, state: $0.state, attached: $0.attached) })
+    }
+
+    /// Runs one command queued by the widget's buttons.
+    func runQueuedCommand() {
+        guard !busy, let cmd = DeviceStore.takeCommand() else { return }
+        switch cmd.action {
+        case "reconnect": reconnectDevice(cmd.addr)
+        case "disconnect": disconnectDevice(cmd.addr)
+        default: break
+        }
+    }
+
+    // MARK: Work buddy
+
+    static let workURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Documents/WifiADB/work.json")
+    private var workModified: Date?
+
+    /// Publishes work.json to the widget whenever the file changes; creates an example if missing.
+    func syncWork() {
+        guard let modified = (try? FileManager.default.attributesOfItem(atPath: Self.workURL.path))?[.modificationDate] as? Date else {
+            try? FileManager.default.createDirectory(at: Self.workURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? WorkStore.example.write(to: Self.workURL, atomically: true, encoding: .utf8)
+            return
+        }
+        guard modified != workModified else { return }
+        workModified = modified
+        if let data = try? Data(contentsOf: Self.workURL), let work = try? WorkStore.decode(data) {
+            WorkStore.save(work)
+        }
+    }
+
+    @objc func openWorkAction(_ sender: NSMenuItem) {
+        NSWorkspace.shared.open(Self.workURL)
     }
 
     func setPanelVisible(_ visible: Bool) {
@@ -677,6 +663,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let widget = action("Show Desktop Widget", #selector(togglePanelAction), nil)
         widget.state = panelVisible ? .on : .off
         menu.addItem(widget)
+        menu.addItem(action("Open work.json", #selector(openWorkAction), nil))
         menu.addItem(action("Connect to IP…", #selector(connectToIPAction), nil))
         menu.addItem(action("Restart adb server", #selector(restartAction), nil))
         menu.addItem(.separator())

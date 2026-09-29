@@ -9,10 +9,13 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000020 /* TimerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* TimerStore.swift */; };
 		A10000000000000000000021 /* TimerIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* TimerIntents.swift */; };
-		A10000000000000000000022 /* BreakTimerCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* BreakTimerCardView.swift */; };
+		A10000000000000000000022 /* DeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* DeviceStore.swift */; };
 		A10000000000000000000023 /* TimerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* TimerStore.swift */; };
 		A10000000000000000000024 /* TimerIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* TimerIntents.swift */; };
-		A10000000000000000000025 /* BreakTimerCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* BreakTimerCardView.swift */; };
+		A10000000000000000000025 /* DeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* DeviceStore.swift */; };
+		A10000000000000000000027 /* WorkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* WorkStore.swift */; };
+		A10000000000000000000028 /* WorkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* WorkStore.swift */; };
+		A10000000000000000000029 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* main.swift */; };
 		A10000000000000000000026 /* WifiADBWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* WifiADBWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -45,7 +48,9 @@
 		A10000000000000000000011 /* WifiADBWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WifiADBWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000012 /* TimerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* TimerIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerIntents.swift; sourceTree = "<group>"; };
-		A10000000000000000000014 /* BreakTimerCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakTimerCardView.swift; sourceTree = "<group>"; };
+		A10000000000000000000014 /* DeviceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceStore.swift; sourceTree = "<group>"; };
+		A10000000000000000000015 /* WorkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkStore.swift; sourceTree = "<group>"; };
+		A10000000000000000000016 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = main.swift; path = ../main.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -95,6 +100,7 @@
 		A10000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
+				A10000000000000000000016 /* main.swift */,
 				A10000000000000000000005 /* App */,
 				A10000000000000000000006 /* Widget */,
 				A10000000000000000000004 /* Shared */,
@@ -116,7 +122,8 @@
 			children = (
 				A10000000000000000000012 /* TimerStore.swift */,
 				A10000000000000000000013 /* TimerIntents.swift */,
-				A10000000000000000000014 /* BreakTimerCardView.swift */,
+				A10000000000000000000014 /* DeviceStore.swift */,
+				A10000000000000000000015 /* WorkStore.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -230,9 +237,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000029 /* main.swift in Sources */,
 				A10000000000000000000020 /* TimerStore.swift in Sources */,
 				A10000000000000000000021 /* TimerIntents.swift in Sources */,
-				A10000000000000000000022 /* BreakTimerCardView.swift in Sources */,
+				A10000000000000000000022 /* DeviceStore.swift in Sources */,
+				A10000000000000000000027 /* WorkStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,7 +251,8 @@
 			files = (
 				A10000000000000000000023 /* TimerStore.swift in Sources */,
 				A10000000000000000000024 /* TimerIntents.swift in Sources */,
-				A10000000000000000000025 /* BreakTimerCardView.swift in Sources */,
+				A10000000000000000000025 /* DeviceStore.swift in Sources */,
+				A10000000000000000000028 /* WorkStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -327,6 +337,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -351,6 +362,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

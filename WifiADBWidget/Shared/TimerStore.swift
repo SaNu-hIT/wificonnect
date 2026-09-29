@@ -4,6 +4,13 @@ import WidgetKit
 /// Must match the App Group in both entitlements files.
 let appGroupID = "group.com.wifiadb.shared"
 
+/// Defaults shared by the app and the widget. Also works unsigned (build.sh); it is then a plain suite.
+let sharedDefaults = UserDefaults(suiteName: appGroupID) ?? .standard
+
+/// ~/Library/Group Containers/<app group>/ — the only place both the app and the sandboxed widget can write.
+let sharedContainer = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
+    ?? FileManager.default.temporaryDirectory
+
 struct TimerState: Codable, Equatable {
     enum Phase: String, Codable { case idle, running, prompt }
     var phase: Phase = .idle
@@ -26,6 +33,19 @@ struct ActivityEntry: Codable {
     let result: String  // "done" or "skipped"
 }
 
+let sharedEncoder: JSONEncoder = {
+    let e = JSONEncoder()
+    e.dateEncodingStrategy = .iso8601
+    e.outputFormatting = [.prettyPrinted, .sortedKeys]
+    return e
+}()
+
+let sharedDecoder: JSONDecoder = {
+    let d = JSONDecoder()
+    d.dateDecodingStrategy = .iso8601
+    return d
+}()
+
 /// Timer state shared between the app and the widget through the App Group.
 enum TimerStore {
     static let presets = [15, 30, 45, 60]
@@ -39,43 +59,23 @@ enum TimerStore {
     ]
 
     private static let stateKey = "timerState"
-    private static var defaults: UserDefaults { UserDefaults(suiteName: appGroupID) ?? .standard }
-
-    private static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return e
-    }()
-
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
-
-    /// ~/Library/Group Containers/<app group>/activity.json
-    static var logURL: URL {
-        let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
-            ?? FileManager.default.temporaryDirectory
-        return dir.appendingPathComponent("activity.json")
-    }
+    static let logURL = sharedContainer.appendingPathComponent("activity.json")
 
     static func load() -> TimerState {
-        guard let data = defaults.data(forKey: stateKey),
-              let state = try? decoder.decode(TimerState.self, from: data) else { return TimerState() }
+        guard let data = sharedDefaults.data(forKey: stateKey),
+              let state = try? sharedDecoder.decode(TimerState.self, from: data) else { return TimerState() }
         return state
     }
 
     static func save(_ state: TimerState) {
-        defaults.set(try? encoder.encode(state), forKey: stateKey)
+        sharedDefaults.set(try? sharedEncoder.encode(state), forKey: stateKey)
         WidgetCenter.shared.reloadAllTimelines()
     }
 
     static func start(minutes: Int) {
         // Rotate through the activities so consecutive prompts differ.
-        let n = defaults.integer(forKey: "activityIndex")
-        defaults.set(n + 1, forKey: "activityIndex")
+        let n = sharedDefaults.integer(forKey: "activityIndex")
+        sharedDefaults.set(n + 1, forKey: "activityIndex")
         let now = Date()
         save(TimerState(phase: .running, minutes: minutes, start: now,
                         end: now.addingTimeInterval(TimeInterval(minutes * 60)),
@@ -95,8 +95,9 @@ enum TimerStore {
     }
 
     private static func appendLog(_ entry: ActivityEntry) {
-        var entries = (try? Data(contentsOf: logURL)).flatMap { try? decoder.decode([ActivityEntry].self, from: $0) } ?? []
+        var entries = (try? Data(contentsOf: logURL)).flatMap { try? sharedDecoder.decode([ActivityEntry].self, from: $0) } ?? []
         entries.append(entry)
-        try? encoder.encode(entries).write(to: logURL)
+        try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? sharedEncoder.encode(entries).write(to: logURL)
     }
 }

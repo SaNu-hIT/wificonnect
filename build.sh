@@ -6,7 +6,12 @@ cd "$(dirname "$0")"
 APP=WifiADB.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-swiftc -O main.swift -o "$APP/Contents/MacOS/WifiADB"
+# Shared stores are also used by the WidgetKit widget in the Xcode project.
+swiftc -O main.swift \
+    WifiADBWidget/Shared/TimerStore.swift \
+    WifiADBWidget/Shared/DeviceStore.swift \
+    WifiADBWidget/Shared/WorkStore.swift \
+    -o "$APP/Contents/MacOS/WifiADB"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
