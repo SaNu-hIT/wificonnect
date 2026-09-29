@@ -622,7 +622,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
             return
         }
-        if !busy { devices = listDevices() }
+        // Use the list from the 3s background poll; calling adb here would block the menu.
         updateUI()
 
         let rows = wirelessRows()

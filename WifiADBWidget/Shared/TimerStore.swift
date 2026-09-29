@@ -87,8 +87,10 @@ enum TimerStore {
     }
 
     /// Logs the answer to the activity prompt and restarts the same duration.
+    /// Ignored unless a prompt is showing, e.g. a stale widget tapped after the panel stopped the timer.
     static func answer(_ result: String) {
         let state = load()
+        guard state.phase(at: Date()) == .prompt, state.minutes > 0 else { return }
         appendLog(ActivityEntry(start: state.start, end: Date(), minutes: state.minutes,
                                 activity: state.activity, result: result))
         start(minutes: state.minutes)
