@@ -64,7 +64,7 @@ WifiADBWidget/
   widget always agree.
 - The widget cannot run adb. Its Reconnect / Disconnect buttons queue a command in the App Group
   and launch the menu bar app if needed; the app runs it on its next poll (≤ 3 s).
-- Break log: `~/Library/Group Containers/group.com.wifiadb.shared/activity.json`.
+- Break log: `~/Library/Group Containers/3JJ3V54F69.com.wifiadb.shared/activity.json`.
 - Widgets cannot play sound or animate flips; the menu bar app plays the sound.
 
 ### Build
@@ -73,11 +73,10 @@ WifiADBWidget/
 2. Project → both targets → **Signing & Capabilities** → set your **Team**.
    If the bundle IDs `com.wifiadb.app` / `com.wifiadb.app.widget` clash, rename them (the widget
    ID must be the app ID plus a suffix).
-3. If Xcode complains about the App Group, use its suggested team-prefixed name in **both**
-   `.entitlements` files and in `appGroupID` in `Shared/TimerStore.swift`.
+3. The App Group is prefixed with the team ID (`3JJ3V54F69.com.wifiadb.shared`), which macOS
+   allows without a provisioning profile. With a different team, change the prefix in **both**
+   `.entitlements` files and in `appGroupID` in `Shared/TimerStore.swift`. A plain `group.…` ID
+   only works if the signing profile lists it; otherwise the sandbox blocks the widget from the
+   shared data and it shows up empty.
 4. Run the **WifiADB** scheme once (it only shows a menu bar icon). Then right-click the desktop →
    **Edit Widgets** → search **Work Buddy** → add the large widget.
-
-The Xcode project was written without Xcode available and has not been built there yet; expect
-small fixes (signing, App Group name) on first open. The menu bar app and the shared code are
-built and tested with `swiftc`.

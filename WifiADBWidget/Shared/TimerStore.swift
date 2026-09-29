@@ -2,7 +2,7 @@ import Foundation
 import WidgetKit
 
 /// Must match the App Group in both entitlements files.
-let appGroupID = "group.com.wifiadb.shared"
+let appGroupID = "3JJ3V54F69.com.wifiadb.shared"
 
 /// Defaults shared by the app and the widget. Also works unsigned (build.sh); it is then a plain suite.
 let sharedDefaults = UserDefaults(suiteName: appGroupID) ?? .standard
