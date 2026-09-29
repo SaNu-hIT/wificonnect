@@ -38,27 +38,17 @@ struct WorkData: Codable, Equatable {
     }
 }
 
-/// Work-buddy data: the app reads work.json from ~/Documents and publishes it here for the widget.
+/// Work-buddy data: the app merges Claude Code projects with work.json from ~/Documents and
+/// publishes the result here for the widget.
 enum WorkStore {
     private static let key = "work"
 
+    /// Starting work.json. Projects come from Claude Code; entries here only override or add.
     static let example = """
     {
-      "focus": "wificonnect",
-      "projects": [
-        {
-          "name": "wificonnect",
-          "status": "in progress",
-          "next": "Build the widget in Xcode and add it to the desktop",
-          "due": "2026-10-05"
-        },
-        {
-          "name": "Example project",
-          "status": "waiting on review",
-          "next": "Reply to review comments",
-          "due": "2026-10-15"
-        }
-      ]
+      "focus": null,
+      "hide": [],
+      "projects": []
     }
 
     """
@@ -73,9 +63,5 @@ enum WorkStore {
         guard work != load() else { return }
         sharedDefaults.set(try? sharedEncoder.encode(work), forKey: key)
         WidgetCenter.shared.reloadAllTimelines()
-    }
-
-    static func decode(_ data: Data) throws -> WorkData {
-        try sharedDecoder.decode(WorkData.self, from: data)
     }
 }

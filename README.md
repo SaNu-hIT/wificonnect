@@ -19,20 +19,34 @@ Requires `adb` in one of: Homebrew `android-commandlinetools`, `~/Library/Androi
 
 ## Work buddy
 
-The app creates `~/Documents/WifiADB/work.json` on first run (menu bar → **Open work.json**):
+Projects come from **Claude Code**: every minute the app reads new lines of the session logs in
+`~/.claude/projects` and lists each repo you worked in, most recent first. Status is live git
+state (`main · 3 uncommitted · 1 unpushed`); the next step is the title of the latest session in
+that repo. Subfolders count as their git repo, or outside git as the top folder under where the
+session was started. Temporary folders, hidden folders and folders that only hold other projects
+(like `~/apps`) are skipped. The first scan reads the whole history once (a few seconds); later
+ones read only what was added.
+
+`~/Documents/WifiADB/work.json` (menu bar → **Open work.json**) adds your own details on top:
 
 ```json
 {
-  "focus": "wificonnect",
+  "focus": "tekto_app",
+  "hide": ["thottam-marketing"],
   "projects": [
-    { "name": "wificonnect", "status": "in progress", "next": "Build the widget", "due": "2026-10-05" }
+    { "name": "tekto_app", "next": "Ship 2.0", "due": "2026-10-10" },
+    { "name": "Taxes", "status": "gather receipts", "due": "2026-10-31" }
   ]
 }
 ```
 
-`focus` names the project shown big at the top; the rest are listed below it with status, next
-step and days left. All fields except `name` are optional. The app re-reads the file within
-3 seconds of a change.
+- `focus` — project shown big at the top; default: the most recently active one.
+- `hide` — names to leave out.
+- `projects` — an entry named like a found project replaces its `status` / `next` and adds `due`;
+  other entries are added after the found ones. All fields except `name` are optional.
+- `"claudeCode": false` — list only `projects`.
+
+The app re-reads the file within 3 seconds of a change.
 
 ## Widget
 

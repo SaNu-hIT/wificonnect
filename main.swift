@@ -15,17 +15,23 @@ let adbPath: String? = [
     "/usr/local/bin/adb",
 ].first { FileManager.default.isExecutableFile(atPath: $0) }
 
-/// Runs adb and returns its combined output. Output goes to a temp file instead of a pipe,
-/// because an adb server daemon started by this call inherits stdout and would hold a pipe open forever.
+/// Runs adb and returns its combined output.
 @discardableResult
 func adb(_ args: [String], timeout: TimeInterval = 10) -> String {
     guard let adbPath else { return "adb not found" }
+    return run(adbPath, args, timeout: timeout)
+}
+
+/// Runs a tool and returns its combined output. Output goes to a temp file instead of a pipe,
+/// because an adb server daemon started by `adb` inherits stdout and would hold a pipe open forever.
+@discardableResult
+func run(_ path: String, _ args: [String], timeout: TimeInterval = 10) -> String {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     FileManager.default.createFile(atPath: url.path, contents: nil)
     defer { try? FileManager.default.removeItem(at: url) }
     guard let handle = try? FileHandle(forWritingTo: url) else { return "cannot create temp file" }
     let p = Process()
-    p.executableURL = URL(fileURLWithPath: adbPath)
+    p.executableURL = URL(fileURLWithPath: path)
     p.arguments = args
     p.standardOutput = handle
     p.standardError = handle
@@ -33,7 +39,7 @@ func adb(_ args: [String], timeout: TimeInterval = 10) -> String {
     DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { if p.isRunning { p.terminate() } }
     p.waitUntilExit()
     try? handle.close()
-    if p.terminationReason == .uncaughtSignal { return "Timed out: adb \(args.joined(separator: " "))" }
+    if p.terminationReason == .uncaughtSignal { return "Timed out: \((path as NSString).lastPathComponent) \(args.joined(separator: " "))" }
     return ((try? String(contentsOf: url, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
@@ -83,6 +89,185 @@ final class ActionButton: NSButton {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     @objc private func fire() { handler() }
+}
+
+// MARK: Claude Code projects
+
+/// Finds projects worked on in Claude Code from its session logs in ~/.claude/projects.
+/// Logs are append-only and large, so each scan reads only the bytes added since the last one.
+/// Not thread-safe: call `scan` from one background queue.
+final class ClaudeProjects {
+    static let logsURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
+    static let git = "/usr/bin/git"
+
+    private struct Session {
+        var offset: UInt64 = 0
+        var title: String?
+        var launch: String?  // first cwd: where the session was started
+        var lastActive: [String: String] = [:]  // cwd -> latest ISO 8601 timestamp (sorts as text)
+        var messages: [String: Int] = [:]  // cwd -> message count
+    }
+
+    private var sessions: [String: Session] = [:]  // log path -> what has been read
+    private var roots: [String: String?] = [:]  // cwd -> project folder, nil when skipped
+
+    /// Projects with Claude Code activity, most recent first, with live git status. Title of the
+    /// latest session in each project becomes its next step.
+    func scan() -> [WorkProject] {
+        let fm = FileManager.default
+        let dirs = (try? fm.contentsOfDirectory(at: Self.logsURL, includingPropertiesForKeys: nil)) ?? []
+        for dir in dirs {
+            for file in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            where file.pathExtension == "jsonl" {
+                read(file.path)
+            }
+        }
+
+        // Per session: activity per project folder.
+        let perSession = sessions.values.map { s -> (Session, [String: (active: String, messages: Int)]) in
+            var roots: [String: (active: String, messages: Int)] = [:]
+            for (cwd, active) in s.lastActive {
+                guard let root = root(for: cwd, launch: s.launch ?? cwd) else { continue }
+                let r = roots[root]
+                roots[root] = (max(active, r?.active ?? ""), (r?.messages ?? 0) + (s.messages[cwd] ?? 0))
+            }
+            return (s, roots)
+        }
+        // Drop folders that only hold other projects, like ~/apps.
+        let all = Set(perSession.flatMap(\.1.keys))
+        let projects = all.filter { r in !all.contains { $0.hasPrefix(r + "/") } }
+
+        var latest: [String: (active: String, title: String?, titleActive: String)] = [:]
+        for (s, roots) in perSession {
+            let kept = roots.filter { projects.contains($0.key) }
+            // A session's title describes the project it spent most messages in.
+            let main = kept.max { $0.value.messages < $1.value.messages }?.key
+            for (root, r) in kept {
+                var p = latest[root] ?? ("", nil, "")
+                p.active = max(p.active, r.active)
+                if root == main, let title = s.title, r.active > p.titleActive { (p.title, p.titleActive) = (title, r.active) }
+                latest[root] = p
+            }
+        }
+        return latest.sorted { $0.value.active > $1.value.active }.map { root, info in
+            WorkProject(name: (root as NSString).lastPathComponent, status: Self.gitStatus(root), next: info.title, due: nil)
+        }
+    }
+
+    /// Reads new complete lines of one log.
+    private func read(_ path: String) {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? UInt64 else { return }
+        var s = sessions[path] ?? Session()
+        if size < s.offset { s = Session() }  // rewritten
+        guard size > s.offset, let handle = FileHandle(forReadingAtPath: path) else { return }
+        defer { try? handle.close() }
+        try? handle.seek(toOffset: s.offset)
+        var partial = Data()
+        var bytesRead: UInt64 = 0
+        while let chunk = try? handle.read(upToCount: 8 << 20), !chunk.isEmpty {
+            bytesRead += UInt64(chunk.count)
+            let buffer = partial + chunk
+            var start = buffer.startIndex
+            while let newline = buffer[start...].firstIndex(of: 0x0A) {
+                parse(buffer[start..<newline], into: &s)
+                start = newline + 1
+            }
+            partial = Data(buffer[start...])
+        }
+        s.offset += bytesRead - UInt64(partial.count)  // an unfinished last line is read again next time
+        sessions[path] = s
+    }
+
+    private static let cwdKey = Data(#""cwd":""#.utf8)
+    private static let timestampKey = Data(#""timestamp":""#.utf8)
+    private static let titleType = Data(#""type":"custom-title""#.utf8)
+
+    /// Takes the working folder and time of each message, and the session title. Searches bytes
+    /// instead of parsing JSON: lines can be megabytes, and these top-level fields sit at the end.
+    private func parse(_ line: Data, into s: inout Session) {
+        if line.range(of: Self.titleType) != nil {
+            if let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+               let title = obj["customTitle"] as? String, !title.isEmpty {
+                s.title = title
+            }
+            return
+        }
+        guard let cwd = Self.value(of: Self.cwdKey, in: line),
+              let time = Self.value(of: Self.timestampKey, in: line) else { return }
+        if s.launch == nil { s.launch = cwd }
+        if time > s.lastActive[cwd] ?? "" { s.lastActive[cwd] = time }
+        s.messages[cwd, default: 0] += 1
+    }
+
+    /// The string after the last occurrence of `key`, up to the closing quote. Only for values
+    /// without escapes (paths, timestamps).
+    private static func value(of key: Data, in line: Data) -> String? {
+        guard let r = line.range(of: key, options: .backwards),
+              let end = line[r.upperBound...].firstIndex(of: 0x22) else { return nil }
+        return String(data: line[r.upperBound..<end], encoding: .utf8)
+    }
+
+    /// The git repo containing `cwd`. Outside git, the top folder below where the session was
+    /// launched (`~/apps/site/assets` launched in `~/apps` is `~/apps/site`). Nil for folders that
+    /// are gone, temporary, hidden or the home folder.
+    private func root(for cwd: String, launch: String) -> String? {
+        if let cached = roots[cwd] { return cached }
+        var root: String?
+        if FileManager.default.fileExists(atPath: cwd) {
+            let top = run(Self.git, ["-C", cwd, "rev-parse", "--show-toplevel"])
+            if top.hasPrefix("/") {
+                root = top
+            } else if cwd.hasPrefix(launch + "/"), let first = cwd.dropFirst(launch.count + 1).split(separator: "/").first {
+                root = launch + "/" + first
+            } else {
+                root = cwd
+            }
+            // Claude Code worktrees count as their main repo.
+            if let r = root?.range(of: "/.claude/worktrees/") { root = String(root![..<r.lowerBound]) }
+        }
+        if let r = root {
+            let temp = ["/tmp/", "/private/tmp/", "/private/var/", NSTemporaryDirectory()]
+            if temp.contains(where: { (r + "/").hasPrefix($0) }) || r == NSHomeDirectory()
+                || (r as NSString).lastPathComponent.hasPrefix(".") {
+                root = nil
+            }
+        }
+        roots[cwd] = root
+        return root
+    }
+
+    /// "main · 3 uncommitted · 1 unpushed", "main · clean", or "not in git".
+    static func gitStatus(_ root: String) -> String {
+        let out = run(git, ["-C", root, "status", "--porcelain", "--branch"])
+        guard out.hasPrefix("## ") else { return "not in git" }
+        let lines = out.split(separator: "\n")
+        let header = lines[0].dropFirst(3)
+        var parts = [header.components(separatedBy: "...")[0]]
+        parts.append(lines.count > 1 ? "\(lines.count - 1) uncommitted" : "clean")
+        if let r = header.range(of: #"ahead \d+"#, options: .regularExpression) {
+            parts.append("\(header[r].dropFirst(6)) unpushed")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// work.json: optional overrides on top of the projects found in Claude Code.
+struct WorkConfig: Decodable {
+    var focus: String?
+    var projects: [WorkProject]?  // same name as a found project: set fields replace found ones
+    var hide: [String]?
+    var claudeCode: Bool?  // false: list only `projects`
+
+    func merged(with found: [WorkProject]) -> WorkData {
+        let manual = projects ?? []
+        let hidden = Set(hide ?? [])
+        var list = (claudeCode == false ? [] : found).filter { !hidden.contains($0.name) }.map { f in
+            guard let m = manual.first(where: { $0.name == f.name }) else { return f }
+            return WorkProject(name: f.name, status: m.status ?? f.status, next: m.next ?? f.next, due: m.due)
+        }
+        list += manual.filter { m in !hidden.contains(m.name) && !list.contains { $0.name == m.name } }
+        return WorkData(focus: focus, projects: list)
+    }
 }
 
 // MARK: Break timer
@@ -574,19 +759,44 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let workURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Documents/WifiADB/work.json")
     private var workModified: Date?
+    private var workConfig = WorkConfig()
+    private let claude = ClaudeProjects()
+    private let claudeQueue = DispatchQueue(label: "claude-projects")
+    private var claudeFound: [WorkProject] = []
+    private var claudeScanned = Date.distantPast
+    private var claudeScanning = false
 
-    /// Publishes work.json to the widget whenever the file changes; creates an example if missing.
+    /// Publishes Claude Code projects merged with work.json to the widget: at once when the file
+    /// changes, and after a rescan every minute. Creates work.json if missing.
     func syncWork() {
         guard let modified = (try? FileManager.default.attributesOfItem(atPath: Self.workURL.path))?[.modificationDate] as? Date else {
             try? FileManager.default.createDirectory(at: Self.workURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? WorkStore.example.write(to: Self.workURL, atomically: true, encoding: .utf8)
             return
         }
-        guard modified != workModified else { return }
-        workModified = modified
-        if let data = try? Data(contentsOf: Self.workURL), let work = try? WorkStore.decode(data) {
-            WorkStore.save(work)
+        if modified != workModified {
+            workModified = modified
+            // Keep the last good config while the file is mid-edit or invalid.
+            if let data = try? Data(contentsOf: Self.workURL), let config = try? sharedDecoder.decode(WorkConfig.self, from: data) {
+                workConfig = config
+                publishWork()
+            }
         }
+        guard workConfig.claudeCode != false, !claudeScanning, Date().timeIntervalSince(claudeScanned) >= 60 else { return }
+        claudeScanning = true
+        claudeQueue.async {
+            let found = self.claude.scan()
+            DispatchQueue.main.async {
+                self.claudeFound = found
+                self.claudeScanned = Date()
+                self.claudeScanning = false
+                self.publishWork()
+            }
+        }
+    }
+
+    private func publishWork() {
+        WorkStore.save(workConfig.merged(with: claudeFound))
     }
 
     @objc func openWorkAction(_ sender: NSMenuItem) {

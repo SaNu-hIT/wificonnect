@@ -94,9 +94,9 @@ struct WorkBuddyView: View {
             }
             ForEach(work.others.prefix(3), id: \.name) { p in
                 HStack(spacing: 6) {
-                    Text(p.name).font(.system(size: 12, weight: .medium))
+                    Text(p.name).font(.system(size: 12, weight: .medium)).lineLimit(1).layoutPriority(1)
                     if let status = p.status {
-                        Text("· \(status)").font(.caption2).foregroundStyle(.secondary)
+                        Text("· \(status)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                     if let next = p.next {
                         Text("→ \(next)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
